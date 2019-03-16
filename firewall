@@ -1,0 +1,28 @@
+#!/bin/sh
+
+wan="enp4s0"
+lan="enp5s0" 
+
+# Clean active rules 
+ufw --force reset
+
+# Defaults
+ufw default deny incoming
+ufw default allow outgoing
+
+# SSH
+ufw allow 5538
+
+# DNS
+ufw allow proto udp from 10.1.2.0/24 to any port 53
+
+# DHCP
+ufw allow in on $lan from any port 68 to any port 67 proto udp
+
+# Squid
+ufw allow proto udp from 10.1.2.0/24 to any port 8080 
+ufw allow proto tcp from 10.1.2.0/24 to any port 8080 
+
+ufw --force enable
+rm /etc/ufw/*.20*
+
