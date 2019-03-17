@@ -6,7 +6,7 @@ Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/bionic64"
   config.vm.network "private_network", ip: "10.1.2.1", virtualbox__intnet: "ubuntu-router"
   config.vm.hostname = "ubuntu-router"
-  config.vm.synced_folder ".", "/home/vagrant"
+  config.vm.synced_folder ".", "/home/vagrant/router"
   # Install packages 
   config.vm.provision "shell", inline: <<-SHELL
     apt-get update
