@@ -1,28 +1,85 @@
 #!/bin/sh
 
-wan="enp4s0"
-lan="enp5s0" 
+wan="enp0s3"
+lan="enp0s8" 
 
-# Clean active rules 
-ufw --force reset
+# Включаем форвардинг пакетов статически, если выключен
+if [ $(cat /proc/sys/net/ipv4/ip_forward) = 0 ]
+then
+  sed -i 's/#net.ipv4.ip_forward/net.ipv4.ip_forward/g' /etc/sysctl.d/99-sysctl.conf
+  sysctl -w net.ipv4.ip_forward=1
+fi
 
-# Defaults
-ufw default deny incoming
-ufw default allow outgoing
+# Очистка действующих правил
+service netfilter-persistent flush
 
-# SSH
-ufw allow 5538
+# Блокировать все
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
 
-# DNS
-ufw allow proto udp from 10.1.2.0/24 to any port 53
+# Разрешить траффик на lo
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
 
-# DHCP
-ufw allow in on $lan from any port 68 to any port 67 proto udp
+# Разрешить доступ из внутренней сети наружу
+iptables -A FORWARD -i $lan -o $wan -j ACCEPT
 
-# Squid
-ufw allow proto udp from 10.1.2.0/24 to any port 8080 
-ufw allow proto tcp from 10.1.2.0/24 to any port 8080 
+# Включаем NAT
 
-ufw --force enable
-rm /etc/ufw/*.20*
+# Получить текущий глобальный IP адрес
+global="$(ifconfig $(echo $wan) | grep -oP 'inet \K\S+')"
 
+for ip in $(cat ip.list)
+do
+iptables -t nat -A POSTROUTING -o $wan -s $ip -j SNAT --to-source $global 
+done
+
+# Разрешаем ответы из внешней сети
+iptables -A FORWARD -i $wan -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Запрещаем доступ снаружи во внутреннюю сеть
+iptables -A FORWARD -i $wan -o $lan -j REJECT
+
+# Разрешить ping
+iptables -A INPUT -p icmp --icmp-type 0 -j ACCEPT
+iptables -A INPUT -p icmp --icmp-type 8 -j ACCEPT
+iptables -A OUTPUT -p icmp -j ACCEPT
+
+# Разрешить SSH
+iptables -A INPUT -p tcp --dport 22 -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+
+# Внешний DNS через TLS
+iptables -A INPUT -i $wan -p tcp --sport 853 -m state --state ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -o $wan -p tcp --dport 853 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+# Разрешить локальный DNS
+iptables -A INPUT -i $lan -p udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -o $lan -p udp --sport 53 --dport 1024:65535 -j ACCEPT
+iptables -t nat -A PREROUTING -i $lan -p udp -m udp --dport 53 -j DNAT --to-destination 10.1.2.1:53 
+
+# Разрешить DHCP 
+iptables -A INPUT -i $lan -p udp --sport 68 --dport 67 -j ACCEPT
+iptables -A OUTPUT -o $lan -p udp --sport 67 --dport 68 -j ACCEPT
+
+# Разрешить исходящий HTTP
+iptables -A INPUT -i $wan -p tcp --sport 80 -m state --state ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -o $wan -p tcp --dport 80 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+# Разрешить исходящий HTTPS
+iptables -A INPUT -i $wan -p tcp --sport 443 -m state --state ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -o $wan -p tcp --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+# Разрешить вхродящие подключения к прокси
+iptables -A INPUT -i $lan -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -o $lan -p tcp --sport 8080 -m state --state ESTABLISHED -j ACCEPT
+
+# Лог
+iptables -N LOGGING
+iptables -A OUTPUT -j LOGGING
+iptables -A LOGGING -m limit --limit 2/min -j LOG --log-prefix "IPTables Packet Dropped: " --log-level 7
+iptables -A LOGGING -j DROP
+
+# Сохранить текущую конфигурацию
+service netfilter-persistent save 
