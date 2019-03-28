@@ -1,7 +1,7 @@
 #!/bin/sh
 
-wan="enp0s3"
-lan="enp0s8" 
+wan="enp11s0f0"
+lan="enp11s0f1" 
 
 # Включаем форвардинг пакетов статически, если выключен
 if [ $(cat /proc/sys/net/ipv4/ip_forward) = 0 ]
@@ -11,6 +11,10 @@ then
 fi
 
 # Очистка действующих правил
+iptables -t nat -F
+iptables -t mangle -F
+iptables -F
+iptables -X
 service netfilter-persistent flush
 
 # Блокировать все
@@ -47,8 +51,8 @@ iptables -A INPUT -p icmp --icmp-type 8 -j ACCEPT
 iptables -A OUTPUT -p icmp -j ACCEPT
 
 # Разрешить SSH
-iptables -A INPUT -p tcp --dport 22 -m state --state NEW,ESTABLISHED -j ACCEPT
-iptables -A OUTPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -p tcp --dport 5538 -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -p tcp --sport 5538 -m state --state ESTABLISHED -j ACCEPT
 
 # Внешний DNS через TLS
 iptables -A INPUT -i $wan -p tcp --sport 853 -m state --state ESTABLISHED -j ACCEPT
